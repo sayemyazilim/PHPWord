@@ -30,6 +30,10 @@ use PhpOffice\PhpWord\Shared\ZipArchive;
 class TemplateProcessor
 {
     const MAXIMUM_REPLACEMENTS_DEFAULT = -1;
+    const SEARCH_LEFT = -1;
+    const SEARCH_RIGHT = 1;
+    const SEARCH_AROUND = 0;
+
 
     /**
      * ZipArchive object.
@@ -1140,6 +1144,16 @@ class TemplateProcessor
         return substr($this->tempDocumentMainPart, $startPosition, ($endPosition - $startPosition));
     }
 
+    protected function getSlice2(&$searchString, $startPosition, $endPosition = 0)
+    {
+        if (!$endPosition) {
+            $endPosition = strlen($searchString);
+        }
+
+        return substr($searchString, $startPosition, ($endPosition - $startPosition));
+    }
+
+
     /**
      * Replaces variable names in cloned
      * rows/blocks with indexed names
@@ -1317,4 +1331,238 @@ class TemplateProcessor
     {
         return preg_match('/[^>]\${|}[^<]/i', $text) == 1;
     }
+
+    private function processRow(
+        $search,
+        $numberOfClones = 1,
+        $replace = true,
+        $incrementVariables = true,
+        $throwException = false
+    ){
+        return $this->processSegment(
+            static::ensureMacroCompleted($search),
+            'w:tr',
+            0,
+            $numberOfClones,
+            'MainPart',
+            function (&$xmlSegment, &$segmentStart, &$segmentEnd, &$part) use (&$replace) {
+                if (strpos($xmlSegment, '<w:vMerge w:val="restart"')) {
+                    $extraRowEnd = $segmentEnd;
+                    while (true) {
+                        $extraRowStart = $extraRowEnd + 1;
+                        $extraRowEnd = strpos($part, '</w:tr>', $extraRowStart);
+
+                        if (!$extraRowEnd) {
+                            break;
+                        }
+                        $extraRowEnd += strlen('</w:tr>');
+                        // If tmpXmlRow doesn't contain continue, this row is no longer part of the spanned row.
+                        $tmpXmlRow = substr($part, $extraRowStart, ($extraRowEnd - $extraRowStart));
+                        if (!preg_match('#<w:vMerge ?/>#', $tmpXmlRow)
+                            && !preg_match('#<w:vMerge w:val="continue" ?/>#', $tmpXmlRow)
+                        ) {
+                            break;
+                        }
+                        // This row was a spanned row, update $segmentEnd and search for the next row.
+                        $segmentEnd = $extraRowEnd;
+                    }
+                    $xmlSegment = substr($part, $segmentStart, ($segmentEnd - $segmentStart));
+                }
+                return $replace;
+            },
+            $incrementVariables,
+            $throwException
+        );
+    }
+    public function processSegment(
+        $needle,
+        $xmltag,
+        $direction = self::SEARCH_AROUND,
+        $clones = 1,
+        $docPart = 'MainPart',
+        $replace = true,
+        $incrementVariables = true,
+        $throwException = false
+    )
+    {
+        $docPart = preg_split('/:/', $docPart);
+        if (count($docPart) > 1) {
+            $part = &$this->{"tempDocument" . $docPart[0]}[$docPart[1]];
+        } else {
+            $part = &$this->{"tempDocument" . $docPart[0]};
+        }
+        $needlePos = strpos($part, $needle);
+
+        if ($needlePos === false) {
+            return $this->failGraciously(
+                "Can not find macro '$needle', text not found or text contains markup.",
+                $throwException,
+                false
+            );
+        }
+
+        $directionStart = $direction == self::SEARCH_RIGHT ? 'findOpenTagRight' : 'findOpenTagLeft';
+        $directionEnd = $direction == self::SEARCH_LEFT ? 'findCloseTagLeft' : 'findCloseTagRight';
+        $segmentStart = $this->{$directionStart}($part, "<$xmltag>", $needlePos, $throwException);
+        $segmentEnd = $this->{$directionEnd}($part, "</$xmltag>", $needlePos, $throwException);
+
+        if ($segmentStart >= $segmentEnd && $segmentEnd) {
+            if ($direction == self::SEARCH_RIGHT) {
+                $segmentEnd = $this->findCloseTagRight($part, "</$xmltag>", $segmentStart);
+            } else {
+                $segmentStart = $this->findOpenTagLeft($part, "<$xmltag>", $segmentEnd - 1, $throwException);
+            }
+        }
+
+        if (!$segmentStart || !$segmentEnd) {
+            return $this->failGraciously(
+                "Can not find <$xmltag> ($segmentStart,$segmentEnd) around segment '$needle'",
+                $throwException,
+                null
+            );
+        }
+
+        $xmlSegment = $this->getSlice2($part, $segmentStart, $segmentEnd);
+
+        while (is_callable($replace)) {
+            $replace = $replace($xmlSegment, $segmentStart, $segmentEnd, $part);
+        }
+        if ($replace !== false) {
+            if ($replace === true) {
+                $replace = static::cloneSlice($xmlSegment, $clones, $incrementVariables);
+            }
+            $part =
+                $this->getSlice2($part, 0, $segmentStart)
+                . $replace
+                . $this->getSlice2($part, $segmentEnd);
+            return true;
+        }
+
+        return $xmlSegment;
+    }
+
+    private function failGraciously($exceptionText, $throwException, $elseReturn)
+    {
+        if ($throwException) {
+            throw new Exception($exceptionText);
+        } else {
+            return $elseReturn;
+        }
+    }
+
+    protected function findOpenTagLeft(&$searchString, $tag, $offset = 0, $throwException = false)
+    {
+        $tagStart = strrpos(
+            $searchString,
+            substr($tag, 0, -1) . ' ',
+            ((strlen($searchString) - $offset) * -1)
+        );
+
+        if ($tagStart === false) {
+            $tagStart = strrpos(
+                $searchString,
+                $tag,
+                ((strlen($searchString) - $offset) * -1)
+            );
+
+            if ($tagStart === false) {
+                return $this->failGraciously(
+                    "Can not find the start position of the item to clone.",
+                    $throwException,
+                    0
+                );
+            }
+        }
+
+        return $tagStart;
+    }
+
+    protected function findOpenTagRight(&$searchString, $tag, $offset = 0, $throwException = false)
+    {
+        $tagStart = strpos(
+            $searchString,
+            substr($tag, 0, -1) . ' ',
+            $offset
+        );
+
+        if ($tagStart === false) {
+            $tagStart = strrpos(
+                $searchString,
+                $tag,
+                $offset
+            );
+
+            if ($tagStart === false) {
+                return $this->failGraciously(
+                    "Can not find the start position of the item to clone.",
+                    $throwException,
+                    0
+                );
+            }
+        }
+
+        return $tagStart;
+    }
+
+    protected function findCloseTagLeft(&$searchString, $tag, $offset = 0)
+    {
+        $pos = strrpos($searchString, $tag, ((strlen($searchString) - $offset) * -1));
+
+        if ($pos !== false) {
+            return $pos + strlen($tag);
+        } else {
+            return 0;
+        }
+    }
+
+
+
+    protected function findCloseTagRight(&$searchString, $tag, $offset = 0)
+    {
+        $pos = strpos($searchString, $tag, $offset);
+
+        if ($pos !== false) {
+            return $pos + strlen($tag);
+        } else {
+            return 0;
+        }
+    }
+
+    protected static function cloneSlice(&$text, $numberOfClones = 1, $incrementVariables = true)
+    {
+        $result = '';
+        for ($i = 1; $i <= $numberOfClones; $i++) {
+            if ($incrementVariables) {
+                $result .= preg_replace('/\$\{(.*?)(\/?)\}/', '\${\\1#' . $i . '\\2}', $text);
+            } else {
+                $result .= $text;
+            }
+        }
+        return $result;
+    }
+
+
+    public function setCheckboxMS($search, $newValue = true)
+    {
+        $this->processSegment(
+            $search,
+            'w:checkBox',
+            -1,
+            0,
+            'MainPart',
+            function (&$xmlSegment, &$segmentStart, &$segmentEnd, &$part) use ($newValue) {
+                $newValue = $newValue ? 1 : 0;
+                $count = 0;
+                $xmlSegment = preg_replace(
+                    ['~<w:default w:val="[^"]+"(\s?)/>~u'],
+                    ['<w:default w:val="' . $newValue . '"\1/>'],
+                    $xmlSegment,
+                    1,
+                    $count
+                );
+                return $xmlSegment; // replace segment and return the $xmlSegment
+            }
+        );
+    }
+
 }

@@ -841,7 +841,6 @@ class TemplateProcessor
 	 * @param string $replacement
 	 */
 	public function replaceBlock($blockname, $replacement) {
-			//dd($this->tempDocumentMainPart);
 			$this->tempDocumentMainPart = preg_replace(
 			'/(\${' . $blockname . '})(.*?)(\${\/' . $blockname . '})/is',
 			$replacement,
@@ -860,7 +859,6 @@ class TemplateProcessor
 	}
 
     public function deleteBlock2($blockname, $raw = ''){
-		//dump($this->tempDocumentMainPart);
 		  $xml = new \SimpleXMLElement($this->tempDocumentMainPart);
 			$startNode = false; $endNode = false;
 			foreach ($xml->xpath('//w:t') as $node)

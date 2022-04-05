@@ -859,6 +859,71 @@ class TemplateProcessor
 		$this->replaceBlock($blockname, '');
 	}
 
+    public function deleteBlock2($blockname, $raw = ''){
+		//dump($this->tempDocumentMainPart);
+		  $xml = new \SimpleXMLElement($this->tempDocumentMainPart);
+			$startNode = false; $endNode = false;
+			foreach ($xml->xpath('//w:t') as $node)
+			{
+				if (strpos($node, '${'.$blockname.'}') !== false)
+				{
+					$startNode = $node;
+					continue;
+				}
+
+				if (strpos($node, '${/'.$blockname.'}') !== false)
+				{
+					$endNode = $node;
+					break;
+				}
+			}
+			// Make sure we found the tags
+			if ($startNode === false || $endNode === false)
+			{
+				return null;
+			}
+
+			// Find the parent <w:p> node for the start tag
+			$node = $startNode; $startNode = null;
+			while (is_null($startNode))
+			{
+				$node = $node->xpath('..')[0]; // parent'a çıkmak için
+				
+				if ($node->getName() == 'p')
+				{
+					$startNode = $node;
+				}
+			}
+
+			$node = $endNode; $endNode = null;
+			while (is_null($endNode))
+			{   
+				$node = $node->xpath('..')[0];
+
+				if ($node->getName() == 'p')
+				{
+					$endNode = $node;
+				}
+			}
+
+			$test = $xml->asXml();
+
+			$xmlBlock = null;
+			
+			preg_match
+			(
+				'/'.preg_quote($startNode->asXml(), '/').'(.*?)'.preg_quote($endNode->asXml(), '/').'/is',
+				$test,
+				$matches
+			);
+
+			$this->tempDocumentMainPart = str_replace
+                (
+                    $matches[0],
+					$raw,
+                    $test
+                );
+	}
 	/**
 	 * Automatically Recalculate Fields on Open
 	 *

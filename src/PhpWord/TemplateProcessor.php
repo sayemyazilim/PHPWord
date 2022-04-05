@@ -856,7 +856,7 @@ class TemplateProcessor
 	 */
 	public function deleteBlock($blockname)
 	{
-		$this->cloneBlock($blockname, 0, true, true);
+		$this->replaceBlock($blockname, '');
 	}
 
 	/**

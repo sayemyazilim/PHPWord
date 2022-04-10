@@ -44,12 +44,14 @@ class CheckBox extends Text
         $xmlWriter->startElement('w:name');
         $xmlWriter->writeAttribute('w:val', $this->getText($element->getName()));
         $xmlWriter->endElement(); //w:name
-        $xmlWriter->writeAttribute('w:enabled', '');
+        $xmlWriter->startElement('w:enabled');
+        $xmlWriter->endElement();
         $xmlWriter->startElement('w:calcOnExit');
         $xmlWriter->writeAttribute('w:val', '0');
         $xmlWriter->endElement(); //w:calcOnExit
         $xmlWriter->startElement('w:checkBox');
-        $xmlWriter->writeAttribute('w:sizeAuto', '');
+        $xmlWriter->startElement('w:sizeAuto');
+        $xmlWriter->endElement();
         $xmlWriter->startElement('w:default');
         $xmlWriter->writeAttribute('w:val', 0);
         $xmlWriter->endElement(); //w:default
@@ -57,6 +59,11 @@ class CheckBox extends Text
         $xmlWriter->endElement(); // w:ffData
         $xmlWriter->endElement(); // w:fldChar
         $xmlWriter->endElement(); // w:r
+
+
+        $xmlWriter->startElement('w:bookmarkStart');
+        $xmlWriter->writeAttribute('w:name', $this->getText($element->getName()));
+        $xmlWriter->endElement();
 
         $xmlWriter->startElement('w:r');
         $xmlWriter->startElement('w:instrText');
